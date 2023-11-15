@@ -16,6 +16,17 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define KILONE_VERSION "0.0.1"
 
+enum editorKey {
+    CURSOR_LEFT = 1000,
+    CURSOR_RIGHT ,
+    CURSOR_UP,
+    CURSOR_DOWN,
+    DEL_KEY,
+    HOME_KEY,
+    END_KEY,
+    PAGE_UP,
+    PAGE_DOWN,
+};
 /*
  * Data
 */
@@ -80,8 +91,9 @@ void enableRawMode() {
     raw.c_iflag &= ~(BRKINT | INPCK | ISTRIP);
 
     // set read() timeout
+    // would make it shorter but for some reason keys keep dropping at 1
     raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 1;
+    raw.c_cc[VTIME] = 2;
 
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
@@ -212,34 +224,82 @@ void editorRefreshScreen(){
 /*
  * Input
  */
-char editorReadKey(){
+int editorReadKey(){
     int nread;
     char c = '\0';
     while((nread = read(STDIN_FILENO, &c, 1)) != 1){
         if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
     }
+
+    if(c == '\x1b'){
+        char seq[3];
+
+        if(read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if(read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+        if(seq[0] == '['){
+            if (seq[1] >= '0' && seq[1] <= '9') {
+                if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+                if (seq[2] == '~') {
+                    switch (seq[1]) {
+                        case '1': return HOME_KEY;
+                        case '3': return DEL_KEY;
+                        case '4': return END_KEY;
+                        case '5': return PAGE_UP;
+                        case '6': return PAGE_DOWN;
+                        case '7': return HOME_KEY;
+                        case '8': return END_KEY;
+                    }
+                }
+            }
+            if (seq[0] == 'O') {
+                switch (seq[1]) {
+                    case 'H': return HOME_KEY;
+                    case 'F': return END_KEY;
+                }
+            }
+            switch(seq[1]){
+                case 'A': return CURSOR_UP;
+                case 'B': return CURSOR_DOWN;
+                case 'C': return CURSOR_RIGHT;
+                case 'D': return CURSOR_LEFT;
+                case 'H': return HOME_KEY;
+                case 'F': return END_KEY;
+            }
+        }
+
+        return '\x1b';
+    }
     return c;
 }
 
-void editorMoveCursor(char key){
+void editorMoveCursor(int key){
     switch(key){
-        case 'a':
-            EDITOR.cx--;
+        case CURSOR_LEFT:
+            if(EDITOR.cx != 0){
+                EDITOR.cx--;
+            }
             break;
-        case 'd':
-            EDITOR.cx++;
+        case CURSOR_RIGHT:
+            if(EDITOR.cx != EDITOR.screencols - 1){
+                EDITOR.cx++;
+            }
             break;
-        case 's':
-            EDITOR.cy++;
+        case CURSOR_DOWN:
+            if(EDITOR.cy != EDITOR.screenrows - 1){
+                EDITOR.cy++;
+            }
             break;
-        case 'w':
-            EDITOR.cy--;
+        case CURSOR_UP:
+            if(EDITOR.cy != 0){
+                EDITOR.cy--;
+            }
             break;
     }
 }
 
 void editorProcessKeyPress(){
-    char c = editorReadKey();
+    int c = editorReadKey();
 
     switch(c){
         case CTRL_KEY('q'):
@@ -249,10 +309,29 @@ void editorProcessKeyPress(){
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
             break;
-        case 'a':
-        case 'd':
-        case 's':
-        case 'w':
+
+        // HOME and END move to the beginning/end of the row
+        case HOME_KEY:
+            EDITOR.cx = 0;
+            break;
+        case END_KEY:
+            EDITOR.cx = EDITOR.screencols - 1;
+            break;
+
+        // move up or down 1 page
+        case PAGE_UP:
+        case PAGE_DOWN:
+        {
+            int times = EDITOR.screenrows;
+            while (times--) editorMoveCursor(c == PAGE_UP ? CURSOR_UP : CURSOR_DOWN);
+        };
+        break;
+
+        // move the cursor
+        case CURSOR_LEFT:
+        case CURSOR_RIGHT:
+        case CURSOR_UP:
+        case CURSOR_DOWN:
             editorMoveCursor(c);
     }
 }
