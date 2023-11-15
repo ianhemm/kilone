@@ -1,6 +1,10 @@
 /*
  *Includes
 */
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -45,7 +49,7 @@ struct editorConfig {
     int cx, cy; // cursor position
     int screenrows, screencols; // screen size
     int numrows;
-    erow row;
+    erow *row;
     struct termios orig_termios; // terminal config we enter the program from
 } EDITOR;
 
@@ -146,18 +150,44 @@ err_no getWindowSize(int *rows, int *cols){
 }
 
 /*
+ * Row Operations
+*/
+void editorAppendRow(char* s, size_t len){
+    EDITOR.row = realloc(EDITOR.row,
+                         sizeof(erow) * (EDITOR.numrows + 1));
+
+    int at = EDITOR.numrows;
+    EDITOR.row[at].size = len;
+    EDITOR.row[at].chars = malloc(len + 1);
+    memcpy(EDITOR.row[at].chars, s, len);
+    EDITOR.row[at].chars[len] = '\0';
+    EDITOR.numrows++;
+}
+
+/*
  * file i/o
 */
+void editorOpen(char* filename) {
+    FILE *fp = fopen(filename, "r");
+    if(!fp) die("fopen");
 
-void editorOpen() {
-    char *line = "Hello, world!";
-    ssize_t linelen = 13;
+    char *line = NULL;
+    size_t linecap = 0;
+    ssize_t linelen;
 
-    EDITOR.row.size = linelen;
-    EDITOR.row.chars = malloc(linelen + 1);
-    memcpy(EDITOR.row.chars, line, linelen);
-    EDITOR.row.chars[linelen] = '\0';
-    EDITOR.numrows = 1;
+    linelen = getline(&line, &linecap,fp);
+    while((linelen = getline(&line, &linecap, fp)) != -1) {
+        if(linelen != -1){
+            while(linelen > 0 &&
+                (line[linelen-1] == '\n' ||
+                line[linelen - 1] == '\r')) {
+                linelen--;
+            }
+            editorAppendRow(line, linelen);
+        }
+    }
+    free(line);
+    fclose(fp);
 }
 
 /*
@@ -194,7 +224,7 @@ void editorDrawRows(struct abuf *ab){
     int y;
     for(y = 0; y < EDITOR.screenrows; y++){
         if(y >= EDITOR.numrows){
-            if(y == EDITOR.screenrows / 3) {
+            if(EDITOR.numrows == 0 && y == EDITOR.screenrows / 3) {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome),
                                           "Kilone editor -- mockery is flattery -- version %s", KILONE_VERSION);
@@ -212,9 +242,9 @@ void editorDrawRows(struct abuf *ab){
                 abAppend(ab,"~",1);
             }
         } else {
-            int len = EDITOR.row.size;
+            int len = EDITOR.row[y].size;
             if(len > EDITOR.screencols) len = EDITOR.screencols;
-            abAppend(ab, EDITOR.row.chars, len);
+            abAppend(ab, EDITOR.row[y].chars, len);
         }
 
 
@@ -373,15 +403,18 @@ void initEditor() {
     EDITOR.cx = 0;
     EDITOR.cy = 0;
     EDITOR.numrows = 0;
+    EDITOR.row = NULL;
 
     if(getWindowSize(&EDITOR.screenrows, &EDITOR.screencols) == -1) die("getWindowSize");
 }
 
-int main(){
+int main(int argc, char* argv[]){
     //init functions
     enableRawMode();
     initEditor();
-    editorOpen();
+    if(argc >= 2){
+        editorOpen(argv[1]);
+    }
 
     while(1){
         editorRefreshScreen();
