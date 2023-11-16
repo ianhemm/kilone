@@ -47,6 +47,7 @@ typedef struct erow {
 // Global Editor State
 struct editorConfig {
     int cx, cy; // cursor position
+    int rowoff, coloff; // offset of the file
     int screenrows, screencols; // screen size
     int numrows;
     erow *row;
@@ -106,7 +107,7 @@ void enableRawMode() {
     // set read() timeout
     // would make it shorter but for some reason keys keep dropping at 1
     raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 2;
+    raw.c_cc[VTIME] = 5;
 
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
@@ -220,10 +221,28 @@ void abFree(struct abuf *ab){
  * Output
 */
 
+void editorScroll(){
+    if(EDITOR.cy < EDITOR.rowoff) {
+        EDITOR.rowoff = EDITOR.cy;
+    }
+    if(EDITOR.cy >= EDITOR.rowoff + EDITOR.screenrows) {
+        EDITOR.rowoff = EDITOR.cy - EDITOR.screenrows + 1;
+    }
+
+    if(EDITOR.cx < EDITOR.coloff){
+        EDITOR.coloff = EDITOR.cx;
+    }
+    if(EDITOR.cx >= EDITOR.coloff + EDITOR.screencols){
+        EDITOR.coloff = EDITOR.cx - EDITOR.screencols + 1;
+    }
+}
+
 void editorDrawRows(struct abuf *ab){
     int y;
     for(y = 0; y < EDITOR.screenrows; y++){
-        if(y >= EDITOR.numrows){
+        int filerow = y + EDITOR.rowoff;
+        if(filerow >= EDITOR.numrows){
+            // Print MOTD if file is empty
             if(EDITOR.numrows == 0 && y == EDITOR.screenrows / 3) {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome),
@@ -239,12 +258,16 @@ void editorDrawRows(struct abuf *ab){
                 
                 abAppend(ab, welcome, welcomelen);
             } else {
-                abAppend(ab,"~",1);
+                abAppend(ab, "~", 1);
             }
         } else {
-            int len = EDITOR.row[y].size;
+            int len = EDITOR.row[filerow].size - EDITOR.coloff;
+            if(len < 0) len = 0;
             if(len > EDITOR.screencols) len = EDITOR.screencols;
-            abAppend(ab, EDITOR.row[y].chars, len);
+
+            abAppend(ab,
+                     &EDITOR.row[filerow].chars[EDITOR.coloff],
+                     len);
         }
 
 
@@ -259,6 +282,8 @@ void editorDrawRows(struct abuf *ab){
 }
 
 void editorRefreshScreen(){
+    editorScroll();
+
     struct abuf ab = ABUF_INIT;
 
     // hide the cursor
@@ -270,7 +295,10 @@ void editorRefreshScreen(){
 
     // Move the cursor to its current position
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", EDITOR.cy + 1, EDITOR.cx + 1);
+    snprintf(buf, sizeof(buf),
+             "\x1b[%d;%dH",
+             (EDITOR.cy - EDITOR.rowoff) + 1,
+             (EDITOR.cx - EDITOR.coloff) + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // show the cursor again after draw
@@ -334,19 +362,27 @@ keycode editorReadKey(){
 }
 
 void editorMoveCursor(keycode key){
+    erow *row = (EDITOR.cy >= EDITOR.numrows) ? NULL : &EDITOR.row[EDITOR.cy];
+
     switch(key){
         case CURSOR_LEFT:
             if(EDITOR.cx != 0){
                 EDITOR.cx--;
+            } else if (EDITOR.cy > 0){
+                EDITOR.cy--;
+                EDITOR.cx = EDITOR.row[EDITOR.cy].size;
             }
             break;
         case CURSOR_RIGHT:
-            if(EDITOR.cx != EDITOR.screencols - 1){
+            if(row && EDITOR.cx < row->size){
                 EDITOR.cx++;
+            } else if (row && EDITOR.cx == row->size){
+                EDITOR.cy++;
+                EDITOR.cx = 0;
             }
             break;
         case CURSOR_DOWN:
-            if(EDITOR.cy != EDITOR.screenrows - 1){
+            if(EDITOR.cy != EDITOR.numrows - 1){
                 EDITOR.cy++;
             }
             break;
@@ -355,6 +391,12 @@ void editorMoveCursor(keycode key){
                 EDITOR.cy--;
             }
             break;
+    }
+
+    row = (EDITOR.cy >= EDITOR.numrows) ? NULL : &EDITOR.row[EDITOR.cy];
+    int rowlen = row ? row->size : 0;
+    if(EDITOR.cx > rowlen){
+        EDITOR.cx = rowlen;
     }
 }
 
@@ -382,8 +424,17 @@ void editorProcessKeyPress(){
         case PAGE_UP:
         case PAGE_DOWN:
         {
+            if(c == PAGE_UP){
+                EDITOR.cy = EDITOR.rowoff;
+            }
+            if(c == PAGE_DOWN){
+                EDITOR.cy = EDITOR.rowoff + EDITOR.screenrows - 1;
+                if(EDITOR.cy > EDITOR.numrows) EDITOR.cy = EDITOR.numrows;
+            }
+
             int times = EDITOR.screenrows;
-            while (times--) editorMoveCursor(c == PAGE_UP ? CURSOR_UP : CURSOR_DOWN);
+            while (times--)
+                editorMoveCursor(c == PAGE_UP ? CURSOR_UP : CURSOR_DOWN);
         };
         break;
 
@@ -402,6 +453,8 @@ void editorProcessKeyPress(){
 void initEditor() {
     EDITOR.cx = 0;
     EDITOR.cy = 0;
+    EDITOR.rowoff = 0;
+    EDITOR.coloff = 0;
     EDITOR.numrows = 0;
     EDITOR.row = NULL;
 
