@@ -26,6 +26,7 @@
 #define KILONE_TAB_STOP 4
 
 enum editorKey {
+    BACKSPACE = 127,
     CURSOR_LEFT = 1000,
     CURSOR_RIGHT ,
     CURSOR_UP,
@@ -203,6 +204,29 @@ void editorAppendRow(char* s, size_t len){
     editorUpdateRow(&EDITOR.row[at]);
 
     EDITOR.numrows++;
+}
+
+void editorRowInsertChar(erow *row,int at, int c){
+    if(at < 0 || at > row->size) at = row->size;
+    row->chars = realloc(row->chars,
+                         row->size + 2);
+    memmove(&row->chars[at + 1],
+            &row->chars[at],
+            row->size - at + 1);
+    row->size++;
+    row->chars[at] = c;
+    editorUpdateRow(row);
+}
+
+/*
+** Editor Operations
+*/
+void editorInsertChar(int c){
+    if(EDITOR.cy == EDITOR.numrows){
+        editorAppendRow("", 0);
+    }
+    editorRowInsertChar(&EDITOR.row[EDITOR.cy], EDITOR.cx, c);
+    EDITOR.cx++;
 }
 
 /*
@@ -504,6 +528,9 @@ void editorProcessKeyPress(){
     keycode c = editorReadKey();
 
     switch(c){
+        case '\r':
+            /* TODO */
+            break;
         case CTRL_KEY('q'):
             // clear the screen
             write(STDOUT_FILENO, "\x1b[2J]",4);
@@ -518,6 +545,12 @@ void editorProcessKeyPress(){
             break;
         case END_KEY:
             EDITOR.cx = EDITOR.screencols - 1;
+            break;
+
+        case BACKSPACE:
+        case CTRL_KEY('h'):
+        case DEL_KEY:
+            /* TODO */
             break;
 
         // move up or down 1 page
@@ -544,6 +577,16 @@ void editorProcessKeyPress(){
         case CURSOR_UP:
         case CURSOR_DOWN:
             editorMoveCursor(c);
+            break;
+
+        case CTRL_KEY('l'):
+        case '\x1b':
+            /* TODO */
+            break;
+
+        default:
+            editorInsertChar(c);
+            break;
     }
 }
 
