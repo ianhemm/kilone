@@ -25,6 +25,7 @@
 
 #define KILONE_VERSION "0.0.1"
 #define KILONE_TAB_STOP 4
+#define KILONE_QUIT_TIMES 3
 
 enum editorKey {
     BACKSPACE = 127,
@@ -60,6 +61,7 @@ struct editorConfig {
     int screenrows, screencols; // screen size
     int numrows;
     erow *row;
+    int dirty;
     char *filename;
     char statusmsg[80];
     time_t statusmsg_time;
@@ -209,6 +211,22 @@ void editorAppendRow(char* s, size_t len){
     editorUpdateRow(&EDITOR.row[at]);
 
     EDITOR.numrows++;
+    EDITOR.dirty++;
+}
+
+void editorFreeRow(erow *row){
+    free(row->render);
+    free(row->chars);
+}
+
+void editorDelRow(int at){
+    if(at < 0 || at >= EDITOR.numrows) return;
+    editorFreeRow(&EDITOR.row[at]);
+    memmove(&EDITOR.row[at],
+            &EDITOR.row[at + 1],
+            sizeof(erow) * (EDITOR.numrows - at - 1));
+    EDITOR.numrows--;
+    EDITOR.dirty++;
 }
 
 void editorRowInsertChar(erow *row,int at, int c){
@@ -221,7 +239,26 @@ void editorRowInsertChar(erow *row,int at, int c){
     row->size++;
     row->chars[at] = c;
     editorUpdateRow(row);
+    EDITOR.dirty++;
 }
+
+void editorRowAppendString(erow *row, char *s, size_t len){
+    row->chars = realloc(row->chars, row->size + len + 1);
+    memcpy(&row->chars[row->size], s, len);
+    row->size += len;
+    row->chars[row->size] = '\0';
+    editorUpdateRow(row);
+    EDITOR.dirty++;
+}
+
+void editorRowDelChar(erow *row, int at){
+    if(at < 0 || at >= row->size) return;
+    memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+    row->size--;
+    editorUpdateRow(row);
+    EDITOR.dirty++;
+}
+
 
 /*
 ** Editor Operations
@@ -233,6 +270,25 @@ void editorInsertChar(int c){
     editorRowInsertChar(&EDITOR.row[EDITOR.cy], EDITOR.cx, c);
     EDITOR.cx++;
 }
+
+void editorDelChar(){
+    if(EDITOR.cy == EDITOR.numrows) return;
+    if(EDITOR.cx == 0 && EDITOR.cy == 0) return;
+
+    erow *row = &EDITOR.row[EDITOR.cy];
+    if(EDITOR.cx > 0){
+        editorRowDelChar(row, EDITOR.cx - 1);
+        EDITOR.cx--;
+    } else {
+        EDITOR.cx = EDITOR.row[EDITOR.cy - 1].size;
+        editorRowAppendString(&EDITOR.row[EDITOR.cy - 1],
+                              row->chars,
+                              row->size);
+        editorDelRow(EDITOR.cy);
+        EDITOR.cy--;
+    }
+}
+
 
 /*
  * file i/o
@@ -281,6 +337,7 @@ void editorOpen(char* filename) {
     }
     free(line);
     fclose(fp);
+    EDITOR.dirty = 0;
 }
 
 void editorSave(){
@@ -296,6 +353,7 @@ void editorSave(){
                 close(fd);
                 free(buf);
                 editorSetStatusMessage("%d bytes written to disk", len);
+                EDITOR.dirty = 0;
                 return;
             }
         }
@@ -412,9 +470,10 @@ void editorDrawRows(struct abuf *ab){
 void editorDrawStatusBar(struct abuf *ab){
     abAppend(ab, "\x1b[7m", 4);
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines",
+    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
                        EDITOR.filename ? EDITOR.filename : "[No Name]",
-                       EDITOR.numrows);
+                       EDITOR.numrows,
+                       EDITOR.dirty? "(modified)" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
                         EDITOR.cy + 1,
                         EDITOR.numrows
@@ -575,12 +634,20 @@ void editorMoveCursor(keycode key){
 
 void editorProcessKeyPress(){
     keycode c = editorReadKey();
+    static int quit_times = KILONE_QUIT_TIMES;
 
     switch(c){
         case '\r':
             /* TODO */
             break;
         case CTRL_KEY('q'):
+            if(EDITOR.dirty && quit_times > 0){
+                editorSetStatusMessage("WARNING!!! File has unsaved changes."
+                                       "Press Ctrl-Q %d more times to quit.",
+                                       quit_times);
+                quit_times--;
+                return;
+            }
             // clear the screen
             write(STDOUT_FILENO, "\x1b[2J]",4);
             // put cursor in the top left corner
@@ -602,7 +669,8 @@ void editorProcessKeyPress(){
         case BACKSPACE:
         case CTRL_KEY('h'):
         case DEL_KEY:
-            /* TODO */
+            if(c == DEL_KEY) editorMoveCursor(CURSOR_RIGHT);
+            editorDelChar();
             break;
 
         // move up or down 1 page
@@ -640,6 +708,8 @@ void editorProcessKeyPress(){
             editorInsertChar(c);
             break;
     }
+
+    quit_times = KILONE_QUIT_TIMES;
 }
 
 /*
@@ -652,6 +722,7 @@ void initEditor() {
     EDITOR.coloff = 0;
     EDITOR.numrows = 0;
     EDITOR.row = NULL;
+    EDITOR.dirty = 0;
     EDITOR.filename = NULL;
     EDITOR.statusmsg[0] = '\0';
     EDITOR.statusmsg_time = 0;
