@@ -73,6 +73,8 @@ struct editorConfig {
  */
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char* editorPrompt(char *prompt);
 
 /*
  * Terminal
@@ -378,7 +380,13 @@ void editorOpen(char* filename) {
 }
 
 void editorSave(){
-    if(EDITOR.filename == NULL) return; // TODO ask for filename instead
+    if(EDITOR.filename == NULL){
+        EDITOR.filename = editorPrompt("Save as: %s");
+        if(EDITOR.filename == NULL) {
+            editorSetStatusMessage("Save aborted!");
+            return;
+        }
+    }
 
     int len;
     char *buf = editorRowsToString(&len);
@@ -638,6 +646,42 @@ keycode editorReadKey(){
         return '\x1b';
     }
     return c;
+}
+
+char *editorPrompt(char* prompt){
+    size_t bufsize = 128;
+    char* buf = malloc(bufsize);
+
+    size_t buflen = 0;
+    buf[0] = '\0';
+
+    while(1){
+        editorSetStatusMessage(prompt, buf);
+        editorRefreshScreen();
+
+        int c = editorReadKey();
+        if(c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE){
+            if(buflen != 0) buf[--buflen] = '\0';
+        }
+        if(c == '\x1b'){
+            editorSetStatusMessage("");
+            free(buf);
+            return NULL;
+        }
+        if(c == '\r') {
+            if(buflen != 0){
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } else if(!iscntrl(c) && c < 128){
+            if(buflen == bufsize - 1){
+                bufsize *=2;
+                buf = realloc(buf,bufsize);
+            }
+            buf[buflen++] = c;
+            buf[buflen] = '\0';
+        }
+    }
 }
 
 void editorMoveCursor(keycode key){
