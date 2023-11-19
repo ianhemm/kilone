@@ -5,7 +5,7 @@
 # @version 0.1
 
 kilo: main.c
-	$(CC) main.c -o kilone -Wall -Wextra -pedantic -std=c99 -lncurses
+	$(CC) main.c -ggdb -o kilone -Wall -Wextra -pedantic -std=c99 -lncurses
 
 
 

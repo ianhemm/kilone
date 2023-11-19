@@ -49,14 +49,15 @@ enum editorKey {
 };
 
 enum editorHighlight {
-    KILONE_HL_NORMAL = 0,
+    KILONE_HL_NORMAL = 1,
     KILONE_HL_COMMENT,
     KILONE_HL_MLCOMMENT,
     KILONE_HL_KEYWORD1,
     KILONE_HL_KEYWORD2,
     KILONE_HL_STRING,
     KILONE_HL_NUMBER,
-    KILONE_HL_MATCH,
+    KILONE_HL_MATCH, // search highlighting
+    KILONE_HL_STATUS, // status bar
 };
 
 #define KILONE_HL_HIGHLIGHT_NUMBERS (1<<0)
@@ -132,20 +133,18 @@ struct editorSyntax HLDB[] = {
 
 #define KILONE_HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))
 
-
 /* Color definitions, use this to define your themes*/
-int editorSyntaxToColor(int hl) {
-    switch(hl) {
-        case KILONE_HL_COMMENT:
-        case KILONE_HL_MLCOMMENT:
-            return 36;
-        case KILONE_HL_KEYWORD1: return 33;
-        case KILONE_HL_KEYWORD2: return 32;
-        case KILONE_HL_STRING: return 35;
-        case KILONE_HL_NUMBER: return 31;
-        case KILONE_HL_MATCH: return 34;
-        default: return 37;
-    }
+void editorInitializeColorPairs(){
+    start_color();
+    init_pair(KILONE_HL_NORMAL, COLOR_WHITE, COLOR_BLACK);
+    init_pair(KILONE_HL_COMMENT, COLOR_CYAN, COLOR_BLACK);
+    init_pair(KILONE_HL_MLCOMMENT, COLOR_CYAN, COLOR_BLACK);
+    init_pair(KILONE_HL_KEYWORD1, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(KILONE_HL_KEYWORD2, COLOR_GREEN, COLOR_BLACK);
+    init_pair(KILONE_HL_STRING, COLOR_MAGENTA, COLOR_BLACK);
+    init_pair(KILONE_HL_NUMBER, COLOR_RED, COLOR_BLACK);
+    init_pair(KILONE_HL_MATCH, COLOR_BLUE, COLOR_BLACK);
+    init_pair(KILONE_HL_STATUS, COLOR_BLACK, COLOR_WHITE);
 }
 
 

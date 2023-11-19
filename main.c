@@ -28,11 +28,6 @@ void die(const char *s){
     exit(1);
 }
 
-void disableRawMode(){
-    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &EDITOR.orig_termios) == -1)
-        die("tcsetattr");
-}
-
 void enableRawMode() {
     // ncurses raw mode
     setlocale(LC_ALL, "");
@@ -40,11 +35,10 @@ void enableRawMode() {
     cbreak();
     noecho();
     nonl();
-
+    raw();
     intrflush(stdscr, FALSE);
     keypad(stdscr, TRUE);
 
-    atexit(disableRawMode);
     // old termios raw mode TODO: remove
     /*
     if(tcgetattr(STDIN_FILENO, &EDITOR.orig_termios) == -1)
@@ -79,37 +73,13 @@ void enableRawMode() {
     */
 }
 
-err_no getCurorPosition(int *rows, int* cols) {
-    char buf[32];
-    unsigned int i = 0;
-
-    // request the goods
-    if(write(STDOUT_FILENO,
-             "\x1b[6n",
-             4) != 4)
-        return -1;
-
-    printf("\r\n");
-    // read the goods
-    while(1 < sizeof(buf) - 1){
-        if(read(STDIN_FILENO, &buf[i], 1) != 1) break;
-        if(buf[1] == 'R') break;
-        i++;
-    }
-    // null termination or things get wierd
-    buf[i] = '\0';
-
-    if(buf[0] != '\x1b' || buf[1] != '[')
-        return -1; // damnit we didnt get an escape sequence YOU HAD ONE JOB
-    if(sscanf(&buf[2],"%d;%d", rows, cols) != 2)
-        return -1; // something parsed wierd or we straight up got wrong values
-
+err_no getCursorPosition(int *rows, int* cols) {
+    getyx(stdscr, *rows, *cols);
     return 0;
 }
 
 err_no getWindowSize(int *rows, int *cols){
-    *cols = COLS;
-    *rows = LINES;
+    getmaxyx(stdscr, *rows, *cols);
 
     return 0;
 }
@@ -732,7 +702,7 @@ void editorScroll(){
     }
 }
 
-void editorPrintMOTD(struct abuf *ab,char* motd){
+void editorPrintMOTD(char* motd){
     char welcome[80];
     int welcomelen = snprintf(welcome, sizeof(welcome),
                               "Kilone editor -- %s -- version %s",
@@ -743,23 +713,23 @@ void editorPrintMOTD(struct abuf *ab,char* motd){
 
     int padding = (EDITOR.screencols - welcomelen) / 2;
     if(padding){
-        abAppend(ab, "~", 1);
+        addnstr( "~", 1);
         padding --;
     }
-    while(padding--) abAppend(ab, " ", 1);
-    abAppend(ab, welcome, welcomelen);
+    while(padding--) addnstr( " ", 1);
+    addnstr( welcome, welcomelen);
 }
 
-void editorDrawRows(struct abuf *ab){
+void editorDrawRows(){
     int y;
     for(y = 0; y < EDITOR.screenrows; y++){
         int filerow = y + EDITOR.rowoff;
         if(filerow >= EDITOR.numrows){
             // Print MOTD if file is empty
             if(EDITOR.numrows == 0 && y == EDITOR.screenrows / 3) {
-                editorPrintMOTD(ab, "mockery is flattery");
+                editorPrintMOTD("mockery is flattery");
             } else {
-                abAppend(ab, "~", 1);
+                addnstr( "~", 1);
             }
         } else {
             int len = EDITOR.row[filerow].rsize - EDITOR.coloff;
@@ -768,52 +738,30 @@ void editorDrawRows(struct abuf *ab){
 
             char *c = &EDITOR.row[filerow].render[EDITOR.coloff];
             unsigned char *hl = &EDITOR.row[filerow].highlight[EDITOR.coloff];
-            int cur_color = -1;
             int j;
             for(j = 0; j < len; j++){
                 if(iscntrl(c[j])){
                     char sym = (c[j] < 26)?
                         '@' + c[j]: '?';
-                    abAppend(ab, "\x1b[7m", 4);
-                    abAppend(ab, &sym, 1);
-                    abAppend(ab, "\x1b[m", 3);
-                    if(cur_color != -1){
-                        char buf[16];
-                        int clen = snprintf(buf, sizeof(buf),
-                                            "\x1b[%dm",
-                                            cur_color);
-                        abAppend(ab, buf, clen);
-                    }
+                    color_set(COLOR_PAIR(KILONE_HL_COMMENT),0);
+                    addnstr(&sym, 1);
+                    attroff(COLOR_PAIR(KILONE_HL_COMMENT));
                 }
-                if(hl[j] == KILONE_HL_NORMAL){
-                    if(cur_color != -1){
-                        abAppend(ab, "\x1b[39m", 5);
-                        cur_color = -1;
-                    }
-                    abAppend(ab, &c[j], 1);
-                } else {
-                    int color = editorSyntaxToColor(hl[j]);
-                    if(color != cur_color){
-                        cur_color = color;
-                        char buf[16];
-                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
-                        abAppend(ab, buf, clen);
-                    }
-                    abAppend(ab, &c[j], 1);
-                }
+                attron(COLOR_PAIR(hl[j]));
+                addnstr( &c[j], 1);
+                attroff(COLOR_PAIR(hl[j]));
             }
-            abAppend(ab, "\x1b[39m", 5);
         }
 
 
-        // clear the line ahead of the cursor
-        abAppend(ab, "\x1b[K", 4);
-        abAppend(ab, "\r\n", 2);
+        // make a newline
+        addnstr( "\n", 2);
     }
 }
 
-void editorDrawStatusBar(struct abuf *ab){
-    abAppend(ab, "\x1b[7m", 4);
+void editorDrawStatusBar(){
+
+    attron(COLOR_PAIR(KILONE_HL_STATUS));
     char status[80], rstatus[80];
     int len = snprintf(status, sizeof(status),
                        "%.20s - %d lines %s",
@@ -829,51 +777,48 @@ void editorDrawStatusBar(struct abuf *ab){
                         EDITOR.numrows);
     if(len > EDITOR.screencols)
         len = EDITOR.screencols;
-    abAppend(ab, status, len);
+    addnstr( status, len);
     while(len < EDITOR.screencols){
         if(EDITOR.screencols - len == rlen){
-            abAppend(ab, rstatus, rlen);
+            addnstr( rstatus, rlen);
             break;
         }
-        abAppend(ab, " ", 1);
+        addnstr( " ", 1);
         len++;
     }
-    abAppend(ab, "\x1b[m", 3);
-    abAppend(ab, "\r\n", 2);
+    attroff(COLOR_PAIR(KILONE_HL_STATUS));
+
+
+    addnstr( "\n", 1);
 }
 
-void editorDrawMessageBar(struct abuf *ab){
-    abAppend(ab, "\x1b[K", 3);
-
+void editorDrawMessageBar(){
     int msglen = strlen(EDITOR.statusmsg);
     if(msglen > EDITOR.screencols)
         msglen = EDITOR.screencols;
     if(msglen && time(NULL) - EDITOR.statusmsg_time < 5)
-        abAppend(ab,
-                 EDITOR.statusmsg,
+        addnstr(EDITOR.statusmsg,
                  msglen);
+    int i = msglen;
+    while(i < EDITOR.screencols){
+        addnstr(" ",1);
+        i++;
+    }
 }
 
 void editorRefreshScreen(){
     editorScroll();
 
-    struct abuf ab = ABUF_INIT;
     // put cursor in the top left corner
     move(0,0);
 
-    editorDrawRows(&ab);
-    editorDrawStatusBar(&ab);
-    editorDrawMessageBar(&ab);
+    editorDrawRows();
+    editorDrawStatusBar();
+    editorDrawMessageBar();
 
     // Move the cursor to its current position
-    move((EDITOR.cy - EDITOR.rowoff) + 1,
-         (EDITOR.rx - EDITOR.coloff) + 1);
-
-    // write the buffer to the screen
-    for(int i = 0; i < ab.len; i++){
-        putchar(ab.b[i]);
-    }
-    abFree(&ab);
+    move((EDITOR.cy - EDITOR.rowoff),
+         (EDITOR.rx - EDITOR.coloff));
 
 }
 
@@ -1101,6 +1046,9 @@ void initEditor() {
     EDITOR.statusmsg[0] = '\0';
     EDITOR.statusmsg_time = 0;
     EDITOR.syntax = NULL;
+
+    if(has_colors() == TRUE)
+        editorInitializeColorPairs();
 
     if(getWindowSize(&EDITOR.screenrows, &EDITOR.screencols) == -1)
         die("getWindowSize");
