@@ -39,6 +39,7 @@ void enableRawMode() {
     initscr();
     cbreak();
     noecho();
+    nonl();
 
     intrflush(stdscr, FALSE);
     keypad(stdscr, TRUE);
@@ -107,18 +108,9 @@ err_no getCurorPosition(int *rows, int* cols) {
 }
 
 err_no getWindowSize(int *rows, int *cols){
-    struct winsize ws;
+    *cols = COLS;
+    *rows = LINES;
 
-    if(ioctl(STDOUT_FILENO, TIOCGWINSZ,&ws) == -1 || ws.ws_col == 0){
-        // no ioctl? uh... lets just fuckin... push the cursor to the bottom right, max distance
-        if(write(STDOUT_FILENO,
-                 "\x1b[999C\x1b[999B", 12)
-           != 12)
-            return -1;
-        return getCurorPosition(rows, cols);
-    }
-    *cols = ws.ws_col;
-    *rows = ws.ws_row;
     return 0;
 }
 
@@ -740,6 +732,24 @@ void editorScroll(){
     }
 }
 
+void editorPrintMOTD(struct abuf *ab,char* motd){
+    char welcome[80];
+    int welcomelen = snprintf(welcome, sizeof(welcome),
+                              "Kilone editor -- %s -- version %s",
+                              motd,
+                              KILONE_VERSION);
+    if(welcomelen > EDITOR.screencols)
+        welcomelen = EDITOR.screencols;
+
+    int padding = (EDITOR.screencols - welcomelen) / 2;
+    if(padding){
+        abAppend(ab, "~", 1);
+        padding --;
+    }
+    while(padding--) abAppend(ab, " ", 1);
+    abAppend(ab, welcome, welcomelen);
+}
+
 void editorDrawRows(struct abuf *ab){
     int y;
     for(y = 0; y < EDITOR.screenrows; y++){
@@ -747,20 +757,7 @@ void editorDrawRows(struct abuf *ab){
         if(filerow >= EDITOR.numrows){
             // Print MOTD if file is empty
             if(EDITOR.numrows == 0 && y == EDITOR.screenrows / 3) {
-                char welcome[80];
-                int welcomelen = snprintf(welcome, sizeof(welcome),
-                                          "Kilone editor -- mockery is flattery -- version %s",
-                                          KILONE_VERSION);
-                if(welcomelen > EDITOR.screencols)
-                    welcomelen = EDITOR.screencols;
-                
-                int padding = (EDITOR.screencols - welcomelen) / 2;
-                if(padding){
-                    abAppend(ab, "~", 1);
-                    padding --;
-                }
-                while(padding--) abAppend(ab, " ", 1);
-                abAppend(ab, welcome, welcomelen);
+                editorPrintMOTD(ab, "mockery is flattery");
             } else {
                 abAppend(ab, "~", 1);
             }
@@ -861,9 +858,6 @@ void editorRefreshScreen(){
     editorScroll();
 
     struct abuf ab = ABUF_INIT;
-
-    // hide the cursor
-    //abAppend(&ab, "\x1b[?25l", 6);
     // put cursor in the top left corner
     move(0,0);
 
@@ -875,9 +869,7 @@ void editorRefreshScreen(){
     move((EDITOR.cy - EDITOR.rowoff) + 1,
          (EDITOR.rx - EDITOR.coloff) + 1);
 
-    // show the cursor again after draw
-    //abAppend(&ab, "\x1b[?25h", 6);
-
+    // write the buffer to the screen
     for(int i = 0; i < ab.len; i++){
         putchar(ab.b[i]);
     }
