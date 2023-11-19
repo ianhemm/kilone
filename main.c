@@ -38,39 +38,6 @@ void enableRawMode() {
     raw();
     intrflush(stdscr, FALSE);
     keypad(stdscr, TRUE);
-
-    // old termios raw mode TODO: remove
-    /*
-    if(tcgetattr(STDIN_FILENO, &EDITOR.orig_termios) == -1)
-        die("tcgetattr");
-    atexit(disableRawMode);
-
-    struct termios raw = EDITOR.orig_termios;
-
-
-    // disable:
-        // echoing,
-        // canonical mode,
-        // handling of SIGINT AND SIGSTP
-        // handling of ctrl-v's terminal functionality
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-    // disable:
-        // software control flow keybinds
-        // automatic translation of \r to \n
-    raw.c_iflag &= ~(IXON | ICRNL);
-    // fuck it, no more processing newlines into carriage returns
-    raw.c_oflag &= ~(OPOST);
-    // some other traditional feature disabling
-    raw.c_cflag |= (CS8);
-    raw.c_iflag &= ~(BRKINT | INPCK | ISTRIP);
-
-    // set read() timeout
-    // would make it shorter but for some reason keys keep dropping at 1
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 5;
-
-    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
-    */
 }
 
 err_no getCursorPosition(int *rows, int* cols) {
