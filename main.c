@@ -15,11 +15,12 @@ char* editorPrompt(char *prompt, void (*callback)(char*, int));
 /*
  * Terminal
 */
+
 void die(const char *s){
     // clear the screen
-    write(STDOUT_FILENO, "\x1b[2J]",4);
+    clear();
     // put cursor in the top left corner
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    move(0,0);
     // put the cursor back jim
     write(STDOUT_FILENO, "\x1b[?25h", 6);
 
@@ -33,6 +34,18 @@ void disableRawMode(){
 }
 
 void enableRawMode() {
+    // ncurses raw mode
+    setlocale(LC_ALL, "");
+    initscr();
+    cbreak();
+    noecho();
+
+    intrflush(stdscr, FALSE);
+    keypad(stdscr, TRUE);
+
+    atexit(disableRawMode);
+    // old termios raw mode TODO: remove
+    /*
     if(tcgetattr(STDIN_FILENO, &EDITOR.orig_termios) == -1)
         die("tcgetattr");
     atexit(disableRawMode);
@@ -62,6 +75,7 @@ void enableRawMode() {
     raw.c_cc[VTIME] = 5;
 
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
+    */
 }
 
 err_no getCurorPosition(int *rows, int* cols) {
@@ -849,26 +863,24 @@ void editorRefreshScreen(){
     struct abuf ab = ABUF_INIT;
 
     // hide the cursor
-    abAppend(&ab, "\x1b[?25l", 6);
+    //abAppend(&ab, "\x1b[?25l", 6);
     // put cursor in the top left corner
-    abAppend(&ab, "\x1b[H", 3);
+    move(0,0);
 
     editorDrawRows(&ab);
     editorDrawStatusBar(&ab);
     editorDrawMessageBar(&ab);
 
     // Move the cursor to its current position
-    char buf[32];
-    snprintf(buf, sizeof(buf),
-             "\x1b[%d;%dH",
-             (EDITOR.cy - EDITOR.rowoff) + 1,
-             (EDITOR.rx - EDITOR.coloff) + 1);
-    abAppend(&ab, buf, strlen(buf));
+    move((EDITOR.cy - EDITOR.rowoff) + 1,
+         (EDITOR.rx - EDITOR.coloff) + 1);
 
     // show the cursor again after draw
-    abAppend(&ab, "\x1b[?25h", 6);
+    //abAppend(&ab, "\x1b[?25h", 6);
 
-    write(STDOUT_FILENO, ab.b, ab.len);
+    for(int i = 0; i < ab.len; i++){
+        putchar(ab.b[i]);
+    }
     abFree(&ab);
 
 }
@@ -887,52 +899,28 @@ void editorSetStatusMessage(const char *fmt, ...){
  * Input
  */
 keycode editorReadKey(){
-    int nread;
-    char c = '\0';
-    while((nread = read(STDIN_FILENO, &c, 1)) != 1){
-        if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN)
-            die("read");
+    // ncurses version of the code
+    keycode c = '\0';
+    if((c = getch()) == ERR){
+        die("getch");
     }
 
-    if(c == '\x1b'){
-        char seq[3];
-
-        if(read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
-        if(read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
-
-        if(seq[0] == '['){
-            if (seq[1] >= '0' && seq[1] <= '9') {
-                if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
-                if (seq[2] == '~') {
-                    switch (seq[1]) {
-                        case '1': return HOME_KEY;
-                        case '3': return DEL_KEY;
-                        case '4': return END_KEY;
-                        case '5': return PAGE_UP;
-                        case '6': return PAGE_DOWN;
-                        case '7': return HOME_KEY;
-                        case '8': return END_KEY;
-                    }
-                }
-            }
-            if (seq[0] == 'O') {
-                switch (seq[1]) {
-                    case 'H': return HOME_KEY;
-                    case 'F': return END_KEY;
-                }
-            }
-            switch(seq[1]){
-                case 'A': return CURSOR_UP;
-                case 'B': return CURSOR_DOWN;
-                case 'C': return CURSOR_RIGHT;
-                case 'D': return CURSOR_LEFT;
-                case 'H': return HOME_KEY;
-                case 'F': return END_KEY;
-            }
-        }
-
-        return '\x1b';
+    // rebinding ncurses codes to the editorKey struct
+    switch(c){
+        case KEY_BACKSPACE: return BACKSPACE;
+        case KEY_LEFT: return CURSOR_LEFT;
+        case KEY_RIGHT: return CURSOR_RIGHT;
+        case KEY_UP: return CURSOR_UP;
+        case KEY_DOWN: return CURSOR_DOWN;
+        case KEY_DC: return DEL_KEY;
+        case KEY_HOME: return HOME_KEY;
+        case KEY_END: return END_KEY;
+        case KEY_PPAGE: return PAGE_UP;
+        case KEY_NPAGE: return PAGE_DOWN;
+        case CTRL('e'): return KILONE_QUIT;
+        case CTRL('w'): return KILONE_SAVE;
     }
+
     return c;
 }
 
@@ -1027,22 +1015,21 @@ void editorProcessKeyPress(){
         case '\r':
             editorInsertNewLine();
             break;
-        case CTRL_KEY('q'):
+        case KILONE_QUIT:
             if(EDITOR.dirty
                && quit_times > 0){
                 editorSetStatusMessage("WARNING!!! File has unsaved changes."
-                                       "Press Ctrl-Q %d more times to quit.",
+                                       "Press Ctrl-E %d more times to quit.",
                                        quit_times);
                 quit_times--;
                 return;
             }
-            // clear the screen
-            write(STDOUT_FILENO, "\x1b[2J]",4);
-            // put cursor in the top left corner
-            write(STDOUT_FILENO, "\x1b[H", 3);
+            clear();
+            move(0,0);
+
             exit(0);
             break;
-        case CTRL_KEY('s'):
+        case KILONE_SAVE:
             editorSave();
             break;
 
@@ -1136,9 +1123,10 @@ int main(int argc, char* argv[]){
         editorOpen(argv[1]);
     }
 
-    editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
+    editorSetStatusMessage("HELP: Ctrl-W = save | Ctrl-E = quit | Ctrl-F = find");
 
     while(1){
+        refresh();
         editorRefreshScreen();
         editorProcessKeyPress();
     }

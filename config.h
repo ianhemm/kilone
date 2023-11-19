@@ -21,12 +21,15 @@
 #include <termios.h>
 #include <time.h>
 
+#include <locale.h>
+#include <ncurses.h>
+
 /*
 ** Defines
 */
 #define CTRL_KEY(k) ((k) & 0x1f)
 
-#define KILONE_VERSION "0.0.1"
+#define KILONE_VERSION "0.1.0"
 #define KILONE_TAB_STOP 4
 #define KILONE_QUIT_TIMES 3
 
@@ -41,6 +44,8 @@ enum editorKey {
     END_KEY,
     PAGE_UP,
     PAGE_DOWN,
+    KILONE_QUIT,
+    KILONE_SAVE,
 };
 
 enum editorHighlight {
