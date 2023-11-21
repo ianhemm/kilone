@@ -744,6 +744,9 @@ char* editorModeEnumToStr(int mode){
 }
 
 void editorSwitchMode(int mode){
+    // FIXME: for some reason when changing the mode from normal to insert
+    // the text updates immediately, but when the mode switches from insert to normal
+    // the status text requires a key press in order to update properly
     switch(mode){
         case KILONE_MODE_NORMAL:
             EDITOR.keybindCallback = keybindNormalModeCallback;
@@ -906,12 +909,17 @@ void editorExecuteCommand(){
     char* command = editorPrompt(":%s", NULL);
 
     // TODO find a better way to do this without needing to hardcode everything
+    // TODO allow whatever scripting language to have access to this functionality
     if(strcmp("wq", command) == 0){
         editorSave();
         goto ON_COMMAND_EXIT;
     }
     if(strcmp("q", command) == 0){
-        if(EDITOR.dirty) editorSetStatusMessage("Modified Buffer: Use :q! if you wish to quit without saving.");
+        if(EDITOR.dirty) {
+            editorSetStatusMessage("Modified Buffer: Use :q! if you wish to quit without saving.");
+        } else {
+            goto ON_COMMAND_EXIT;
+        }
     }
     if(strcmp("q!", command) == 0){
         goto ON_COMMAND_EXIT;
@@ -991,8 +999,6 @@ void editorProcessKeyPress(){
 
 
 void keybindNormalModeCallback(keycode c){
-    static int quit_times = KILONE_QUIT_TIMES;
-
     switch(c){
         case 'i':
             editorSwitchMode(KILONE_MODE_INSERT);
@@ -1000,23 +1006,14 @@ void keybindNormalModeCallback(keycode c){
         case ':':
             editorExecuteCommand();
             break;
-        case KILONE_QUIT:
-            if(EDITOR.dirty
-               && quit_times > 0){
-                editorSetStatusMessage("WARNING!!! File has unsaved changes."
-                                       "Press Ctrl-E %d more times to quit.",
-                                       quit_times);
-                quit_times--;
-                return;
-            }
-            clear();
-            move(0,0);
-
-            exit(0);
-            break;
-        case KILONE_SAVE:
-            editorSave();
-            break;
+        // TODO: implement more keybinds
+            // 'dd' and the 'd' family(heh): delete the line/word/etc...
+            // 'v' and the 'v' family: visual mode
+            // 'y' and 'p': copy paste, might even get clipboard functionality
+            // the rest of the insert mode family: 'a','A','o','O','I'
+            // the rest of the move cursor family: '$', 'b','w','B','W' etc...
+            // allowing mnemonic selectors like 'b','w','{','[','(', 'a',etc
+                // to work in most relevant modes
 
         // move the cursor
         case CURSOR_LEFT:
@@ -1041,8 +1038,6 @@ void keybindNormalModeCallback(keycode c){
             editorMoveCursor(CURSOR_RIGHT);
             break;
     }
-
-    quit_times = KILONE_QUIT_TIMES;
 }
 
 void keybindInsertModeCallback(keycode c){
@@ -1154,7 +1149,7 @@ int main(int argc, char* argv[]){
         editorOpen(argv[1]);
     }
 
-    editorSetStatusMessage("HELP: Ctrl-W = save | Ctrl-E = quit | Ctrl-F = find");
+    editorSetStatusMessage("HELP: ':wq' = save and quit | ':q' & ':q!' = quit without saving |  Ctrl-F = find");
 
     while(1){
         refresh();
