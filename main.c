@@ -16,8 +16,8 @@ char* editorPrompt(char *prompt, void (*callback)(char*, int));
 // mode callbacks
 
 void keybindNormalModeCallback(keycode c);
-void keybindVisualModeCallback(keycode c);
 void keybindInsertModeCallback(keycode c);
+void keybindVisualModeCallback(keycode c);
 
 /*
  * Terminal
@@ -733,17 +733,43 @@ void editorDrawRows(){
     }
 }
 
+char* editorModeEnumToStr(int mode){
+    switch(mode){
+        case KILONE_MODE_NORMAL: return "NORMAL";
+        case KILONE_MODE_INSERT: return "INSERT";
+        case KILONE_MODE_VISUAL: return "VISUAL";
+    }
+
+    return "NONE";
+}
+
+void editorSwitchMode(int mode){
+    switch(mode){
+        case KILONE_MODE_NORMAL:
+            EDITOR.keybindCallback = keybindNormalModeCallback;
+            break;
+        case KILONE_MODE_INSERT:
+            EDITOR.keybindCallback = keybindInsertModeCallback;
+            break;
+        case KILONE_MODE_VISUAL:
+            EDITOR.keybindCallback = keybindVisualModeCallback;
+            break;
+    }
+    EDITOR.cur_mode = mode;
+}
+
 void editorDrawStatusBar(){
 
     attron(COLOR_PAIR(KILONE_HL_STATUS));
-    char status[80], rstatus[80];
+    char status[120], rstatus[120];
     int len = snprintf(status, sizeof(status),
                        "%.20s - %d lines %s",
                        EDITOR.filename ? EDITOR.filename : "[No Name]",
                        EDITOR.numrows,
                        EDITOR.dirty? "(modified)" : "");
     int rlen = snprintf(rstatus, sizeof(rstatus),
-                        "%s | %d/%d",
+                        "%s | %s | %d/%d",
+                        editorModeEnumToStr(EDITOR.cur_mode),
                         EDITOR.syntax?
                             EDITOR.syntax->filetype :
                             "no ft",
@@ -875,6 +901,45 @@ char *editorPrompt(char* prompt, void (*callback)(char*, int)){
     }
 }
 
+// commands like :wq and :e go here.
+void editorExecuteCommand(){
+    char* command = editorPrompt(":%s", NULL);
+
+    // TODO find a better way to do this without needing to hardcode everything
+    if(strcmp("wq", command) == 0){
+        editorSave();
+        goto ON_COMMAND_EXIT;
+    }
+    if(strcmp("q", command) == 0){
+        if(EDITOR.dirty) editorSetStatusMessage("Modified Buffer: Use :q! if you wish to quit without saving.");
+    }
+    if(strcmp("q!", command) == 0){
+        goto ON_COMMAND_EXIT;
+    }
+    if(strcmp("w", command) == 0){
+        editorSave();
+    }
+
+
+    if(command){
+        free(command);
+    }
+
+    return;
+
+    // how we are going to free resources
+    // without needing to put the same command in everything that exits
+    ON_COMMAND_EXIT:
+    if(command){
+        free(command);
+    }
+
+    clear();
+    move(0,0);
+
+    exit(0);
+}
+
 void editorMoveCursor(keycode key){
     erow *row = (EDITOR.cy >= EDITOR.numrows)?
         NULL :
@@ -924,13 +989,17 @@ void editorProcessKeyPress(){
     EDITOR.keybindCallback(c);
 }
 
+
 void keybindNormalModeCallback(keycode c){
     static int quit_times = KILONE_QUIT_TIMES;
 
     switch(c){
         case 'i':
-            EDITOR.keybindCallback = keybindInsertModeCallback;
+            editorSwitchMode(KILONE_MODE_INSERT);
             return;
+        case ':':
+            editorExecuteCommand();
+            break;
         case KILONE_QUIT:
             if(EDITOR.dirty
                && quit_times > 0){
@@ -956,13 +1025,27 @@ void keybindNormalModeCallback(keycode c){
         case CURSOR_DOWN:
             editorMoveCursor(c);
             break;
+
+        // vim style
+        // i have no idea how to do this for other keyboards
+        case 'h':
+            editorMoveCursor(CURSOR_LEFT);
+            break;
+        case 'j':
+            editorMoveCursor(CURSOR_DOWN);
+            break;
+        case 'k':
+            editorMoveCursor(CURSOR_UP);
+            break;
+        case 'l':
+            editorMoveCursor(CURSOR_RIGHT);
+            break;
     }
 
     quit_times = KILONE_QUIT_TIMES;
 }
 
 void keybindInsertModeCallback(keycode c){
-
     switch(c){
         case '\r':
             editorInsertNewLine();
@@ -1011,7 +1094,7 @@ void keybindInsertModeCallback(keycode c){
 
         case CTRL_KEY('l'):
         case '\x1b':
-            EDITOR.keybindCallback = keybindNormalModeCallback;
+            editorSwitchMode(KILONE_MODE_NORMAL);
             break;
 
         // move the cursor
@@ -1024,6 +1107,14 @@ void keybindInsertModeCallback(keycode c){
 
         default:
             editorInsertChar(c);
+            break;
+    }
+}
+
+void keybindVisualModeCallback(keycode c){
+    switch(c){
+        case '\x1b':
+            editorSwitchMode(KILONE_MODE_NORMAL);
             break;
     }
 
@@ -1044,6 +1135,7 @@ void initEditor() {
     EDITOR.statusmsg[0] = '\0';
     EDITOR.statusmsg_time = 0;
     EDITOR.syntax = NULL;
+    EDITOR.cur_mode = KILONE_MODE_NORMAL;
     EDITOR.keybindCallback = keybindNormalModeCallback;
 
     if(has_colors() == TRUE)

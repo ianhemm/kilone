@@ -63,6 +63,12 @@ enum editorHighlight {
 #define KILONE_HL_HIGHLIGHT_NUMBERS (1<<0)
 #define KILONE_HL_HIGHLIGHT_STRINGS (1<<1)
 
+enum editorMode {
+KILONE_MODE_NORMAL = 0,
+KILONE_MODE_INSERT,
+KILONE_MODE_VISUAL,
+};
+
 /*
  * Data
 */
@@ -102,6 +108,7 @@ struct editorConfig {
     char statusmsg[80];
     time_t statusmsg_time;
     struct editorSyntax *syntax;
+    enum editorMode cur_mode;
     void (*keybindCallback)(keycode c);
 } EDITOR;
 
