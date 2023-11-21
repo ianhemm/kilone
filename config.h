@@ -102,6 +102,7 @@ struct editorConfig {
     char statusmsg[80];
     time_t statusmsg_time;
     struct editorSyntax *syntax;
+    void (*keybindCallback)(keycode c);
 } EDITOR;
 
 /*

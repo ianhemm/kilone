@@ -12,6 +12,13 @@ void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
 char* editorPrompt(char *prompt, void (*callback)(char*, int));
 
+
+// mode callbacks
+
+void keybindNormalModeCallback(keycode c);
+void keybindVisualModeCallback(keycode c);
+void keybindInsertModeCallback(keycode c);
+
 /*
  * Terminal
 */
@@ -913,12 +920,17 @@ void editorMoveCursor(keycode key){
 
 void editorProcessKeyPress(){
     keycode c = editorReadKey();
+
+    EDITOR.keybindCallback(c);
+}
+
+void keybindNormalModeCallback(keycode c){
     static int quit_times = KILONE_QUIT_TIMES;
 
     switch(c){
-        case '\r':
-            editorInsertNewLine();
-            break;
+        case 'i':
+            EDITOR.keybindCallback = keybindInsertModeCallback;
+            return;
         case KILONE_QUIT:
             if(EDITOR.dirty
                && quit_times > 0){
@@ -935,6 +947,25 @@ void editorProcessKeyPress(){
             break;
         case KILONE_SAVE:
             editorSave();
+            break;
+
+        // move the cursor
+        case CURSOR_LEFT:
+        case CURSOR_RIGHT:
+        case CURSOR_UP:
+        case CURSOR_DOWN:
+            editorMoveCursor(c);
+            break;
+    }
+
+    quit_times = KILONE_QUIT_TIMES;
+}
+
+void keybindInsertModeCallback(keycode c){
+
+    switch(c){
+        case '\r':
+            editorInsertNewLine();
             break;
 
         // HOME and END move to the beginning/end of the row
@@ -977,6 +1008,12 @@ void editorProcessKeyPress(){
         };
         break;
 
+
+        case CTRL_KEY('l'):
+        case '\x1b':
+            EDITOR.keybindCallback = keybindNormalModeCallback;
+            break;
+
         // move the cursor
         case CURSOR_LEFT:
         case CURSOR_RIGHT:
@@ -985,17 +1022,11 @@ void editorProcessKeyPress(){
             editorMoveCursor(c);
             break;
 
-        case CTRL_KEY('l'):
-        case '\x1b':
-            /* TODO */
-            break;
-
         default:
             editorInsertChar(c);
             break;
     }
 
-    quit_times = KILONE_QUIT_TIMES;
 }
 
 /*
@@ -1013,6 +1044,7 @@ void initEditor() {
     EDITOR.statusmsg[0] = '\0';
     EDITOR.statusmsg_time = 0;
     EDITOR.syntax = NULL;
+    EDITOR.keybindCallback = keybindNormalModeCallback;
 
     if(has_colors() == TRUE)
         editorInitializeColorPairs();
